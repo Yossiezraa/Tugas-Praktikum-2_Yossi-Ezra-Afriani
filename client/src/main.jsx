@@ -9,10 +9,16 @@ import RegisterPage from "./pages/Register.jsx";
 import Week1Page from "./pages/week1.jsx";
 import HomePage from "./pages/home.jsx";
 import BahayaPage from "./pages/Bahaya.jsx";
+import Dashboard from "./pages/Dashboard.jsx";
+
 
 const router = createBrowserRouter([
   {
     path: "/",
+    element: <LoginPage />, 
+  },
+  {
+    path: "/app",
     element: <App />,
     children: [
       {
@@ -26,16 +32,16 @@ const router = createBrowserRouter([
     ],
   },
   {
-    path: "/login",
-    element: <LoginPage />,
-  },
-  {
     path: "/register",
     element: <RegisterPage />,
   },
   {
     path: "/bahaya",
     element: <BahayaPage />,
+  },
+  {
+    path: "/homepage",
+    element: <Dashboard />,
   },
 ]);
 

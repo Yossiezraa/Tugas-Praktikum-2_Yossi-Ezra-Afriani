@@ -1,95 +1,60 @@
 const express = require("express");
 const cors = require("cors");
-const multer = require("multer");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
+const nodemailer = require("nodemailer");
 const db = require("./config/database");
+
+
 const app = express();
 const port = 3000;
 
+
 dotenv.config();
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "./uploads");
-  },
-  filename: (req, file, cb) => {
-    cb(null, file.originalname); // Preserve the original filename
-  },
-});
-const upload = multer({ storage: storage });
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static("uploads"));
 
-app.get("/test", (req, res) => {
-  res.send("Hello World!");
+
+// Inisialisasi transporter untuk pengiriman email
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
-app.get("/nama/:nama", (req, res) => {
-  const { nama } = req.params;
-  const { umur } = req.query;
-
-  if (umur) {
-    res.send(`Nama saya ${nama} dan umur saya ${umur}`);
-  } else {
-    res.send(`Nama saya ${nama}`);
-  }
-});
-
-app.get("/users", async (req, res) => {
-  try {
-    const DataUser = await db.query("SELECT * FROM user");
-    return res.status(200).json({
-      msg: "Data user berhasil di GET",
-      data: DataUser,
-    });
-  } catch (error) {
-    return res.status(400).json({
-      msg: "Data user gagal di GET",
-      err: error,
-    });
-  }
-});
-
-app.get("/user/:id", async (req, res) => {
-  const { id } = req.params;
-  try {
-    const DataUser = await db.query(`SELECT * FROM user WHERE id = ${id}`);
-    return res.status(200).json({
-      msg: "Data user berhasil di GET",
-      data: DataUser[0],
-    });
-  } catch (error) {
-    return res.status(400).json({
-      msg: "Data user gagal di GET",
-      err: error,
-    });
-  }
-});
 
 app.post("/daftar", async (req, res) => {
   const { fullname, email, password, umur, role } = req.body;
   try {
-    const post_data =
-      await db.query(`INSERT INTO user(fullname, email, password, umur, role) 
-                                    VALUES ("${fullname}", "${email}", "${password}", "${umur}", "${role}")`);
+    const post_data = await db.query(`INSERT INTO user(fullname, email, password, umur, role, is_verified)
+                                     VALUES ("${fullname}", "${email}", "${password}", "${umur}", "${role}", FALSE)`);
+
 
     if (post_data) {
+      const user = { id: post_data.insertId, fullname, email, umur, role };
+      const token = generateToken(user);
+      sendVerificationEmail(user, token);
+
+
       const logInsert = await db.query(
         `INSERT INTO logs(pesan, waktu) VALUES ("User baru terdaftar dengan ID ${
           post_data.insertId
         }", "${new Date().toISOString().slice(0, 19).replace("T", " ")}")`,
       );
-    }
 
-    res.status(200).json({
-      msg: "Berhasil membuat user",
-      user: post_data,
-    });
+
+      res.status(200).json({
+        msg: "Berhasil membuat user. Silakan verifikasi email Anda.",
+        user: post_data,
+      });
+    }
   } catch (error) {
+    console.error("Error creating user:", error);
     res.status(400).json({
       msg: "Gagal membuat user",
       err: error,
@@ -97,76 +62,109 @@ app.post("/daftar", async (req, res) => {
   }
 });
 
-app.post("/upload/:id_user", upload.single("avatar"), async (req, res) => {
-  const { id_user } = req.params;
+
+
+
+// Fungsi untuk mengirim email verifikasi
+function sendVerificationEmail(email, verificationLink) {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: "Verifikasi Email",
+    html: `<p>Silakan klik link berikut untuk verifikasi email: <a href="${verificationLink}">${verificationLink}</a></p>`,
+  };
+
+
+  transporter.sendMail(mailOptions, function (error, info) {
+    if (error) {
+      console.error("Error sending email:", error);
+    } else {
+      console.log("Email sent:", info.response);
+    }
+  });
+}
+
+
+// Endpoint untuk pengiriman email verifikasi
+app.post("/send-verification-email", async (req, res) => {
+  const { email } = req.body;
+
+
   try {
-    const UploadFoto = db.query(
-      `UPDATE user SET profile_picture = "${`./uploads/${req.file.filename}`}" WHERE id = ${id_user}`,
-    );
-    return res.status(200).json({
-      msg: "Berhasil upload gambar",
+    // Di sini kamu perlu menghasilkan link verifikasi yang unik, misalnya dengan menambahkan token atau UUID
+    const verificationLink = "https://example.com/verify-email?token=your-verification-token";
+
+
+    // Kirim email verifikasi
+    sendVerificationEmail(email, verificationLink);
+
+
+    res.status(200).json({
+      msg: "Email verifikasi berhasil dikirim",
     });
   } catch (error) {
-    return res.status(400).json({
-      msg: "Gagal upload",
-      err: error,
+    console.error("Failed to send verification email:", error);
+    res.status(500).json({
+      msg: "Gagal mengirim email verifikasi",
+      error: error.message,
     });
   }
 });
 
+
+// Fungsi untuk menghasilkan token JWT
+function generateToken(user) {
+  return jwt.sign(
+    {
+      id: user.id,
+      fullname: user.fullname,
+      email: user.email,
+      age: user.umur,
+      role: user.role,
+    },
+    process.env.JWT_SECRET_KEY,
+    { expiresIn: "1h" }
+  );
+}
+
+
+// Endpoint untuk login
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
+
+
   try {
-    const User = await db.query(
-      `SELECT id, fullname, profile_picture, umur, role FROM user WHERE email = '${email}' AND password = '${password}' `,
-    );
+    const user = await db.query(`SELECT * FROM user WHERE email = "${email}" AND password = "${password}"`);
 
-    if (User.length === 1) {
-      const login_log = await db.query(
-        `INSERT INTO logs(pesan, waktu) VALUES ("User dengan ID ${
-          User[0].id
-        } telah login", "${new Date()
-          .toISOString()
-          .slice(0, 19)
-          .replace("T", " ")}")`,
-      );
 
-      const token = jwt.sign(User[0], process.env.JWT_SECRET_KEY, {
-        expiresIn: "3600s",
+    if (user.length > 0) {
+      const token = generateToken(user[0]); // Membuat token JWT
+
+
+      // Insert log
+      await db.query(`INSERT INTO logs(pesan, waktu) VALUES ("User dengan email ${email} berhasil login", "${new Date().toISOString().slice(0, 19).replace("T", " ")}")`);
+
+
+      res.status(200).json({
+        msg: "Login berhasil",
+        user: user[0], // Mengirimkan data user yang berhasil login
+        token: token, // Mengirimkan token JWT ke klien
       });
-
-      return res.json({
-        msg: "Logged In",
-        data: token,
+    } else {
+      res.status(401).json({
+        msg: "Login gagal, email atau password salah",
       });
     }
-
-    return res.json({
-      msg: "User not Found",
-    });
   } catch (error) {
-    return res.json({
-      msg: "Error occured when logging in",
+    console.error("Failed to login:", error);
+    res.status(500).json({
+      msg: "Gagal melakukan login",
+      error: error.message,
     });
   }
 });
 
-app.post("/verifytoken", (req, res) => {
-  const { token } = req.body;
-
-  if (token) {
-    const data = jwt.verify(token, process.env.JWT_SECRET_KEY);
-
-    return res.json({
-      data: data,
-    });
-  }
-
-  return res.json({
-    msg: "Token invalid",
-  });
-});
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`Server is running on port ${port}`);
 });

@@ -3,7 +3,7 @@ const config = {
     host: "127.0.0.1",
     user: "root",
     password: "",
-    database: "pabw-praktikum",
+    database: "user",
     connectTimeout: 60000,
   },
 };
